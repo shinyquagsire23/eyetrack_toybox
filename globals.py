@@ -1,0 +1,29 @@
+
+class Globals():
+
+    DIKABLIS_ROOT = "/Volumes/server_storage/training_data/Dikablis/"
+    DIKABLIS_VIDEOS_ROOT = DIKABLIS_ROOT + "VIDEOS/"
+    DIKABLIS_ANNOTATIONS_ROOT = DIKABLIS_ROOT + "ANNOTATIONS/"
+
+    TRAIN_MAX_SEQS = 200
+    TRAIN_BATCH_SIZE = 8
+    TRAIN_ON_ANNOTATED = False
+
+    NETWORK_OUTPUT_SIZE = 4
+    NETWORK_RECURRENT_SIZE = 12
+    NETWORK_PATCH_SIZE = 48
+
+    '''
+    INPUT_SHAPE_NOBATCH = (None, None, 1)
+    TRAIN_INPUT_SHAPE = (TRAIN_BATCH_SIZE, None, None, 1)
+    EXPORT_INPUT_SHAPE = (1, None, None, 1)
+    '''
+
+    INPUT_SHAPE_NOBATCH = (288,384,1)
+    TRAIN_INPUT_SHAPE = (TRAIN_BATCH_SIZE, 288,384,1)
+    EXPORT_INPUT_SHAPE = (1, 288,384,1)
+
+    TRAIN_NUM_EPOCHS = 1000
+
+    def idk():
+        a='a'
