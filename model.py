@@ -7,6 +7,19 @@ from tensorflow.keras.callbacks import LambdaCallback
 from tensorflow.keras.constraints import Constraint
 
 from globals import *
+from resample import hexagonal_patches_simple_tf
+
+RSTATE_IDX_XPOS = 0
+RSTATE_IDX_YPOS = 1
+RSTATE_IDX_SCALE = 2
+RSTATE_IDX_XVEL = 3
+RSTATE_IDX_YVEL = 4
+RSTATE_IDX_SCALEVEL = 5
+RSTATE_IDX_SHAPE = 6
+RSTATE_IDX_ROT = 7
+RSTATE_IDX_SHAPEVEL = 8
+RSTATE_IDX_ROTVEL = 9
+RSTATE_IDX_END = 8
 
 class EchoRNNCell(keras.layers.Layer):
     '''
@@ -52,9 +65,71 @@ class MinMaxConstraint(Constraint):
         w = w * scale
         return w + m
 
+class HexPatchLayer(keras.layers.Layer):
+    '''
+    Used to keep a recurrent state for previous values of any Tensor
+    '''
+    def __init__(self, batch_size=Globals.TRAIN_BATCH_SIZE, **kwargs):
+        self.batch_size = batch_size
+        super(HexPatchLayer, self).__init__(**kwargs)
+
+    def build(self, input_shape):
+        #self.state_size = input_shape[0]
+        self.built = True
+
+    def call(self, inputs, training=False):
+
+        image_input = inputs[0]
+        scale = inputs[1]
+        hexshape = inputs[2]
+        pos = inputs[3]
+        hexrot = inputs[4]
+
+        scale = tf.clip_by_value(scale, 0.0, 1.0)
+        pos = tf.clip_by_value(pos, 0.0, 1.0)
+
+        output_shape = (-1, Globals.NETWORK_PATCH_SIZE, Globals.NETWORK_PATCH_SIZE, 3)
+
+        a,b,c = hexagonal_patches_simple_tf(image_input, scale, hexshape, pos, hexrot)
+
+        self._grid_x_1 = a[1]
+        self._grid_y_1 = a[2]
+        self._grid_x_2 = b[1]
+        self._grid_y_2 = b[2]
+        self._grid_x_3 = c[1]
+        self._grid_y_3 = c[2]
+
+        self._patch_1 = tf.cast(a[0], dtype=tf.float32)
+        self._patch_2 = tf.cast(b[0], dtype=tf.float32)
+        self._patch_3 = tf.cast(c[0], dtype=tf.float32)
+
+        '''
+        if training:
+            gamma = tf.random.uniform([], 1.8, 1.9)
+            self._patch_1 = tf.image.adjust_gamma(self._patch_1, gamma=gamma, gain=1)
+            self._patch_2 = tf.image.adjust_gamma(self._patch_2, gamma=gamma, gain=1)
+            self._patch_3 = tf.image.adjust_gamma(self._patch_3, gamma=gamma, gain=1)
+        else:
+            gamma = 1.8
+            self._patch_1 = tf.image.adjust_gamma(self._patch_1, gamma=gamma, gain=1)
+            self._patch_2 = tf.image.adjust_gamma(self._patch_2, gamma=gamma, gain=1)
+            self._patch_3 = tf.image.adjust_gamma(self._patch_3, gamma=gamma, gain=1)
+        '''
+
+        self._patch_1 = tf.image.per_image_standardization(self._patch_1)
+        self._patch_2 = tf.image.per_image_standardization(self._patch_2)
+        self._patch_3 = tf.image.per_image_standardization(self._patch_3)
+
+        #tf.print(self._patch_1, self._patch_2, self._patch_3)
+
+        #print (self._grid_x_1.name)
+
+        return tf.reshape(tf.stack([self._patch_1,self._patch_2,self._patch_3], axis=3), output_shape)
+
+
 class EyeNet(tf.keras.Model):
 
-    def __init__(self,input_shape=(288,384,1),batch_size=Globals.TRAIN_BATCH_SIZE):
+    def __init__(self,input_shape=(Globals.TRAIN_BATCH_SIZE,288,384,1),batch_size=Globals.TRAIN_BATCH_SIZE):
         super().__init__()
 
         self.patch_size = Globals.NETWORK_PATCH_SIZE
@@ -69,7 +144,7 @@ class EyeNet(tf.keras.Model):
         #self.boxes = None
         self.batch_size = batch_size
         self.box_indices = None
-        self.input_layer = layers.Layer(name="input_layer", input_shape=(None, input_shape[0], input_shape[1], input_shape[2]))
+        self.input_layer = layers.Layer(name="input_layer", input_shape=(self.batch_size, input_shape[1], input_shape[2], input_shape[3]))
         self.fe_initial_downsample = layers.AveragePooling2D(pool_size=(4, 4))
         
         # Initial feature extractor
@@ -105,7 +180,7 @@ class EyeNet(tf.keras.Model):
         #self.fe_dense_4_2 = layers.Dense(64, activation='tanh')
         #self.fe_out = layers.Dense(5, activation='linear', kernel_constraint=MinMaxConstraint(0.1, 1.0), bias_constraint=MinMaxConstraint(-1.0, 1.0))
         self.fe_out = layers.Dense(Globals.NETWORK_RECURRENT_SIZE, activation='tanh')
-        self.fe_out_2 = layers.Dense(Globals.NETWORK_RECURRENT_SIZE, activation='tanh')
+        #self.fe_out_2 = layers.Dense(Globals.NETWORK_RECURRENT_SIZE, activation='tanh')
 
         #self.fe_indirect_access = tf.Variable(tf.ones((self.batch_size, Globals.NETWORK_RECURRENT_SIZE)) * 0.5, trainable=False, name="fe_indirect_access")
         #self.outputs_indirect_access = tf.Variable(tf.ones((self.batch_size, Globals.NETWORK_OUTPUT_SIZE)) * 0.5, trainable=False, name="outputs_indirect_access")
@@ -114,8 +189,8 @@ class EyeNet(tf.keras.Model):
         self.fe_final_concat = layers.Concatenate(axis=1)
         self.fe_x_concat = layers.Concatenate(axis=1)
 
-        self.image_crop_reshape = layers.Reshape((self.patch_size, self.patch_size, 1))
-        self.image_crop = layers.Layer(input_shape=(self.patch_size,self.patch_size), name="image_crop")
+
+        self.hex_crop = HexPatchLayer(batch_size=self.batch_size)
 
         # Final feature extractor
         self.ffe_conv_1 = layers.Conv2D(filters=64, kernel_size=(5,5), activation='tanh', input_shape=input_shape[1:], name="ffe_conv_1")
@@ -194,6 +269,7 @@ class EyeNet(tf.keras.Model):
         inputs_shape = tf.shape(inputs)
         inputs_shape_fp32 = tf.cast(inputs_shape, tf.float32)
         x = self.input_layer(inputs, input_shape=inputs_shape)
+        
         image_input = tf.cast(x, dtype=tf.float32)
 
         def salt_and_pepper(image, prob_salt=0.1, prob_pepper=0.1):
@@ -204,6 +280,7 @@ class EyeNet(tf.keras.Model):
 
         if training:
             image_input = salt_and_pepper(image_input)
+
         '''
         if training:
             noise = 0.3
@@ -216,8 +293,8 @@ class EyeNet(tf.keras.Model):
         image_height = inputs_shape_fp32[1]
         image_width = inputs_shape_fp32[2]
 
-        shift_left = [[(-0.5/image_height), (-0.5/image_width)]]
-        shift_right = [[(0.5/image_height), (0.5/image_width)]]
+        shift_left = [[(-0.5/image_width), (-0.5/image_height)]]
+        shift_right = [[(0.5/image_width), (0.5/image_height)]]
         shift_left = tf.tile(shift_left, (inputs_shape[0],1))
         shift_right = tf.tile(shift_right, (inputs_shape[0],1))
 
@@ -230,8 +307,8 @@ class EyeNet(tf.keras.Model):
         
         # The feature extractor attempts to get the following information:
         # [patch_center_x, patch_center_y, patch_scale, patch_vel_x, patch_vel_y]
-        fe_x = tf.cast(x, dtype=tf.float32)
-        fe_x = self.fe_initial_downsample(fe_x)
+        
+        fe_x = self.fe_initial_downsample(image_input)
         if training:
             gamma = tf.random.uniform([], 1.8, 1.9)
             fe_x = tf.keras.layers.Lambda(lambda fe_x: tf.map_fn(lambda img: tf.image.adjust_gamma(
@@ -268,6 +345,7 @@ class EyeNet(tf.keras.Model):
         fe_x = self.fe_dense__2(fe_x)
         fe_x = self.fe_reshape_predense(fe_x)
         fe_x = self.fe_dense_2(fe_x)
+
         fe_x = self.fe_reshape_postdense(fe_x)
 
         # We want to give this area a bit more information to work with,
@@ -290,23 +368,28 @@ class EyeNet(tf.keras.Model):
         #if type(fe_x) is tf.Tensor:
         #    self.fe_indirect_access.assign(tf.reshape(fe_x, (self.batch_size, Globals.NETWORK_RECURRENT_SIZE)))
 
-
-        fe_x = tf.concat([fe_x[:, 0:3], fe_x[:, 3:5], fe_x[:, 5:]], -1)
         fe_x_cur = fe_x
 
-        fe_x_yx = last_fe_output[:, 0:2] + fe_x[:, 3:5]
-        fe_x_yx = tf.math.floormod(fe_x_yx, 1.0)
-        #fe_x_yx = last_fe_output[:, 0:2] + last_fe_output[:, 3:5]
-        fe_x_scale = tf.clip_by_value(last_fe_output[:, 2:3] + fe_x[:, 5:6], 0.5, 1.5)
+        fe_x_xy = last_fe_output[:, RSTATE_IDX_XPOS:RSTATE_IDX_YPOS+1] + fe_x[:, RSTATE_IDX_XVEL:RSTATE_IDX_YVEL+1]
+        fe_x_xy = tf.math.floormod(fe_x_xy, 1.0)
+        #fe_x_xy = last_fe_output[:, 0:2] + last_fe_output[:, 3:5]
+        fe_x_scale = tf.clip_by_value(last_fe_output[:, RSTATE_IDX_SCALE:RSTATE_IDX_SCALE+1] + fe_x[:, RSTATE_IDX_SCALEVEL:RSTATE_IDX_SCALEVEL+1], 0.5, 1.5)
 
+        fe_x_hexshape = last_fe_output[:, RSTATE_IDX_SHAPE:RSTATE_IDX_SHAPE+1] + fe_x[:, RSTATE_IDX_SHAPEVEL:RSTATE_IDX_SHAPEVEL+1]
+        fe_x_hexrot = last_fe_output[:, RSTATE_IDX_ROT:RSTATE_IDX_ROT+1] + fe_x[:, RSTATE_IDX_ROTVEL:RSTATE_IDX_ROTVEL+1]
+
+        fe_x_hexrot = tf.math.floormod(fe_x_hexrot, np.pi * 2.0)
+        fe_x_hexshape = tf.clip_by_value(fe_x_hexshape, -10.0, 10.0)
+
+        #print ("hexshape", fe_x_hexshape)
 
         #fe_x = tf.reshape(fe_x, (-1, 5))
         #print (fe_x.shape)
         #print (fe_x[:, 2:3].shape)
         
 
-        shift_left = tf.math.multiply(shift_left, image_width*0.3) #float(self.patch_size)
-        shift_right = tf.math.multiply(shift_right, image_width*0.3)
+        shift_left = tf.math.multiply(shift_left, float(Globals.NETWORK_PATCH_SIZE) * 4.0) #float(self.patch_size)
+        shift_right = tf.math.multiply(shift_right, float(Globals.NETWORK_PATCH_SIZE) * 4.0)
         shift_left = tf.math.multiply(shift_left, fe_x_scale)
         shift_right = tf.math.multiply(shift_right, fe_x_scale)
         #shift_left = tf.math.multiply(shift_left, fe_x[:, 2:3])
@@ -320,23 +403,23 @@ class EyeNet(tf.keras.Model):
 
         #fe_x1y1 = tfp.math.clip_by_value_preserve_gradient(fe_x[:, 0:2], 0.0, 1.0) + shift_left #+ fe_x[:, 3:5]
         #fe_x2y2 = tfp.math.clip_by_value_preserve_gradient(fe_x[:, 0:2], 0.0, 1.0) + shift_right #+ fe_x[:, 3:5]
-        fe_y1x1 = fe_x_yx[:, 0:2] + shift_left #+ fe_x[:, 3:5]
-        fe_y2x2 = fe_x_yx[:, 0:2] + shift_right #+ fe_x[:, 3:5]
+        fe_x1y1 = fe_x_xy[:, 0:2] + shift_left #+ fe_x[:, 3:5]
+        fe_x2y2 = fe_x_xy[:, 0:2] + shift_right #+ fe_x[:, 3:5]
 
         # Prevent the box from running off the sides of the image
         
         '''
-        fe_y2x2 -= tf.minimum(fe_y1x1, 0.0)
-        fe_y1x1 -= tf.minimum(fe_y1x1, 0.0)
+        fe_x2y2 -= tf.minimum(fe_x1y1, 0.0)
+        fe_x1y1 -= tf.minimum(fe_x1y1, 0.0)
         
-        fe_y1x1 -= (tf.maximum(fe_y2x2, 1.0) - 1.0)
-        fe_y2x2 -= (tf.maximum(fe_y2x2, 1.0) - 1.0)
+        fe_x1y1 -= (tf.maximum(fe_x2y2, 1.0) - 1.0)
+        fe_x2y2 -= (tf.maximum(fe_x2y2, 1.0) - 1.0)
         '''
         
-        fe_x_final = self.fe_final_concat([fe_y1x1, fe_y2x2])
+        fe_x_final = self.fe_final_concat([fe_x1y1, fe_x2y2])
 
-        #fe_x_yx = (fe_y2x2 + fe_y1x1) * 0.5
-        fe_x = self.fe_x_concat([tf.clip_by_value(fe_x_yx, 0.0, 1.0), fe_x_scale, fe_x[:, 3:4], fe_x[:, 4:5], fe_x[:, 5:6], fe_x[:, 6:Globals.NETWORK_RECURRENT_SIZE]])
+        #fe_x_xy = (fe_x2y2 + fe_x1y1) * 0.5
+        fe_x = self.fe_x_concat([tf.clip_by_value(fe_x_xy, 0.0, 1.0), fe_x_scale, fe_x[:, RSTATE_IDX_XVEL:RSTATE_IDX_XVEL+1], fe_x[:, RSTATE_IDX_YVEL:RSTATE_IDX_YVEL+1], fe_x[:, RSTATE_IDX_SCALEVEL:RSTATE_IDX_SCALEVEL+1], fe_x_hexshape, fe_x_hexrot, fe_x[:, RSTATE_IDX_END:Globals.NETWORK_RECURRENT_SIZE]])
         fe_x_rnnin = tf.reshape(fe_x, (inputs_shape[0], 1, Globals.NETWORK_RECURRENT_SIZE))
         fe_x_ = self.last_fe_output_rnn(fe_x_rnnin)
         #print (self.boxes.shape)
@@ -350,6 +433,7 @@ class EyeNet(tf.keras.Model):
         fe_x_final_rnnin = tf.reshape(fe_x_final, (inputs_shape[0], 1, 4))
         fe_x_final_ = self.last_rect_output_rnn(fe_x_final_rnnin)
 
+        '''
         x = tf.image.crop_and_resize(
             image_input,
             fe_x_final,
@@ -358,25 +442,13 @@ class EyeNet(tf.keras.Model):
             method='bilinear',
             name="image_crop_tfop"
         )
+        '''
 
-        x = tf.cast(x, dtype=tf.float32)
+        self._fe_x_final = fe_x_final
 
-        if training:
-            gamma = tf.random.uniform([], 1.8, 1.9)
-            x = tf.keras.layers.Lambda(lambda x: tf.keras.backend.map_fn(lambda img: tf.image.adjust_gamma(
-                img, gamma=gamma, gain=1
-            ), x))(x)
-        else:
-            gamma = 1.8
-            x = tf.keras.layers.Lambda(lambda x: tf.keras.backend.map_fn(lambda img: tf.image.adjust_gamma(
-                img, gamma=gamma, gain=1
-            ), x))(x)
-
-        x = tf.keras.layers.Lambda(lambda x: tf.keras.backend.map_fn(lambda img: tf.image.per_image_standardization(img), x))(x)
+        #a,b,c = tf.keras.layers.Lambda(lambda image_input: hexagonal_patches_simple_tf(image_input, fe_x_scale, [0.0]*self.batch_size, fe_x_xy, [0.0]*self.batch_size))(image_input)
+        x = self.hex_crop([image_input, fe_x_scale, fe_x_hexshape, fe_x_xy, fe_x_hexrot])
         
-
-        x = self.image_crop_reshape(x)
-        x = self.image_crop(x)
         #self.metric_1(x)
         #tf.print(inputs)
         #tf.print(x)
@@ -414,9 +486,6 @@ class EyeNet(tf.keras.Model):
         x = self.dense_out(x)# - self.dense_out_2(x)
         outputs = self.reshape_2(x)
 
-        fe_x1y1 = tf.concat([fe_y1x1[:, 1:2], fe_y1x1[:, 0:1]], -1)
-        fe_x2y2 = tf.concat([fe_y2x2[:, 1:2], fe_y2x2[:, 0:1]], -1)
-
         box_center = ((fe_x2y2 + fe_x1y1) * 0.5)
 
         outputs = outputs * 0.5#(1.1 * outputs) - (1.1 * 0.5)
@@ -432,27 +501,27 @@ class EyeNet(tf.keras.Model):
         outputs_x = outputs[:, 0:1]
         outputs_y = outputs[:, 1:2]
 
-        outputs_x *= (fe_y2x2[:, 1:2] - fe_y1x1[:, 1:2])
-        outputs_y *= (fe_y2x2[:, 0:1] - fe_y1x1[:, 0:1])
+        outputs_x *= (fe_x2y2[:, 0:1] - fe_x1y1[:, 0:1])
+        outputs_y *= (fe_x2y2[:, 1:2] - fe_x1y1[:, 1:2])
 
-        outputs_x += box_center[:, 0:1]#fe_y1x1[:, 1:2]
-        outputs_y += box_center[:, 1:2]#fe_y1x1[:, 0:1]
+        outputs_x += box_center[:, 0:1]#fe_x1y1[:, 1:2]
+        outputs_y += box_center[:, 1:2]#fe_x1y1[:, 0:1]
 
         last_outputs_x = last_output[:, 0:1]
         last_outputs_y = last_output[:, 1:2]
         
         # keep points within box
-        #outputs_x = tf.clip_by_value(outputs_x, fe_y1x1[:, 1:2], fe_y2x2[:, 1:2])
-        #outputs_y = tf.clip_by_value(outputs_y, fe_y1x1[:, 0:1], fe_y2x2[:, 0:1])
+        #outputs_x = tf.clip_by_value(outputs_x, fe_x1y1[:, 1:2], fe_x2y2[:, 1:2])
+        #outputs_y = tf.clip_by_value(outputs_y, fe_x1y1[:, 0:1], fe_x2y2[:, 0:1])
         
 
-        #outputs_x += fe_x[:, 4:5]
-        #outputs_y += fe_x[:, 3:4]
+        #outputs_x += fe_x[:, 3:4]
+        #outputs_y += fe_x[:, 4:5]
 
-        last_outputs_x_vel = last_output[:, 2:3]
-        last_outputs_y_vel = last_output[:, 3:4]
-        outputs_x_vel = (outputs_x - fe_y1x1[:, 1:2]) - (last_outputs_x - last_rect[:, 1:2]) + fe_x[:, 4:5]
-        outputs_y_vel = (outputs_y - fe_y1x1[:, 0:1]) - (last_outputs_y - last_rect[:, 0:1]) + fe_x[:, 3:4]
+        last_outputs_x_vel = last_output[:, 2:3] # last x vel
+        last_outputs_y_vel = last_output[:, 3:4] # last y vel
+        outputs_x_vel = (outputs_x - fe_x1y1[:, 0:1]) - (last_outputs_x - last_rect[:, 0:1]) + fe_x[:, RSTATE_IDX_XVEL:RSTATE_IDX_XVEL+1]
+        outputs_y_vel = (outputs_y - fe_x1y1[:, 1:2]) - (last_outputs_y - last_rect[:, 1:2]) + fe_x[:, RSTATE_IDX_YVEL:RSTATE_IDX_YVEL+1]
 
         '''
         outputs_x_vel_fixed = tf.where(tf.greater(last_outputs_x_vel, 0.0), 
@@ -477,13 +546,14 @@ class EyeNet(tf.keras.Model):
         '''
 
         outputs = tf.concat([outputs_x, outputs_y, outputs_x_vel, outputs_y_vel], -1)
-        outputs_flipped = tf.concat([outputs_y, outputs_x], -1)
+        #print ("asdf", outputs_x, outputs_y, outputs_x_vel, outputs_y_vel)
+        #outputs_flipped = tf.concat([outputs_y, outputs_x], -1)
         outputs_rnnin = tf.reshape(outputs, (inputs_shape[0], 1, Globals.NETWORK_OUTPUT_SIZE))
         outputs_ = self.last_output_rnn(outputs_rnnin)
        
 
         if type(outputs) is tf.Tensor and type(box_center) is tf.Tensor:
-            self.fe_x_cur_tensor = tf.concat([fe_x_cur[:, 4:5], fe_x_cur[:, 3:4]], -1)
+            self.fe_x_cur_tensor = tf.concat([fe_x_cur[:, RSTATE_IDX_XVEL:RSTATE_IDX_XVEL+1], fe_x_cur[:, RSTATE_IDX_YVEL:RSTATE_IDX_YVEL+1]], -1)
             self.box_center_tensor = box_center
             self.outputs_tensor = outputs
             self.scale_tensor = fe_x_scale
@@ -500,7 +570,8 @@ def build_model(batch_size):
 
     # Model / data parameters
     input_shape = (batch_size, Globals.TRAIN_INPUT_SHAPE[1], Globals.TRAIN_INPUT_SHAPE[2], Globals.TRAIN_INPUT_SHAPE[3])
-    
+    Globals.TRAIN_INPUT_SHAPE = input_shape
+
     #input_shape = (batch_size, 256,256,1)
     output_shape = (Globals.NETWORK_OUTPUT_SIZE,)
 
@@ -513,6 +584,7 @@ def build_model(batch_size):
     model_out = EyeNet(input_shape=input_shape, batch_size=batch_size)
 
     test_inputs = keras.Input(batch_input_shape=input_shape) #tf.zeros(input_shape)#
+    #test_inputs = tf.zeros(input_shape)
     model_out.call(test_inputs, training=True)
     model_out.build(input_shape=input_shape)
     

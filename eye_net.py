@@ -17,6 +17,10 @@ from tensorflow.keras.constraints import Constraint
 import tensorflow_probability as tfp
 from tensorflow.python.framework.ops import disable_eager_execution
 
+import traceback
+import sys
+import inspect
+
 from evaluate import run_network
 from model import build_model
 from data_serve import data_serve_init, read_landmarks, read_iris_eli, CustomDataGen
@@ -92,7 +96,7 @@ def train_model(epochs, resume=False):
 
         #print (model._tensorboard_callback._train_step)
         
-        model._tensorboard_callback._train_writer.flush()
+        #model._tensorboard_callback.writer.flush()
         
         #model._train_epoch_num_tensor += 1
 
@@ -177,7 +181,7 @@ def train_model(epochs, resume=False):
         # try and keep the ffe dot in the center of the box as much as possible
         # the weights on this one are a bit lower because we want it to refine later in the train
         dot_dist = tf.norm(model.box_center_tensor-y_pred_pos, axis=1)
-        pt_is_too_far_from_box_center = tf.math.reduce_sum(tf.where(tf.greater(dot_dist, 0.15 * model.scale_tensor), 
+        pt_is_too_far_from_box_center = tf.math.reduce_sum(tf.where(tf.greater(dot_dist, 0.20 * model.scale_tensor), 
                                       dot_dist * 1000.0,
                                       dot_dist * 0.001))
         #tf.print("too far", model.box_center_tensor, y_pred_pos, tf.norm(model.box_center_tensor-y_pred_pos, axis=1), pt_is_too_far_from_box_center)
@@ -205,11 +209,13 @@ def train_model(epochs, resume=False):
         model.loss_pt_is_too_far_from_box_center = pt_is_too_far_from_box_center
         model.loss_slow_down_loss = slow_down_loss
 
+        '''
         tf.summary.scalar('loss_position', data=model.loss_loss)
         tf.summary.scalar('loss_vel_loss', data=model.loss_vel_loss)
         tf.summary.scalar('loss_ffe_eyevel', data=model.loss_vel_loss_4)
         tf.summary.scalar('loss_pt_is_too_far_from_box_center', data=model.loss_pt_is_too_far_from_box_center)
         tf.summary.scalar('loss_slow_down_loss', data=model.loss_slow_down_loss)
+        '''
 
         '''
         tf.print("\nlosses:",loss, vel_loss, vel_loss_4, pt_is_too_far_from_box_center)
@@ -239,10 +245,25 @@ def train_model(epochs, resume=False):
         out += slow_down_loss
 
         return out #vel_loss_2, vel_loss_3 
-    
+
+    def loss_position_metric(y_true, y_pred):
+        return model.loss_loss
+
+    def loss_vel_loss_metric(y_true, y_pred):
+        return model.loss_vel_loss
+
+    def loss_ffe_eyevel_metric(y_true, y_pred):
+        return model.loss_vel_loss_4
+
+    def loss_pt_is_too_far_from_box_center_metric(y_true, y_pred):
+        return model.loss_pt_is_too_far_from_box_center
+
+    def loss_slow_down_loss_metric(y_true, y_pred):
+        return model.loss_slow_down_loss
+
     #plot_stuff(model)
 
-    epochs_safe = 20
+    epochs_safe = 30
     '''
     if model._epochs_trained == 0:
         opt = tf.keras.optimizers.Adam(learning_rate=1e-5)
@@ -251,11 +272,11 @@ def train_model(epochs, resume=False):
     '''
 
     #opt = tf.keras.optimizers.Adam(learning_rate=1e-5)
-    opt = tf.keras.optimizers.Adagrad(learning_rate=0.0001, initial_accumulator_value=0.1, epsilon=1e-07)
+    opt = tf.keras.optimizers.Adagrad(learning_rate=0.00001, initial_accumulator_value=0.01, epsilon=1e-07)
     #opt = tf.keras.optimizers.SGD(learning_rate=1e-3, decay=1e-6, momentum=0.9) #1e-2 
     #loss = tf.keras.losses.MeanSquaredError(reduction='sum_over_batch_size')
     tf.summary.experimental.set_step(opt.iterations)
-    model.compile(loss=custom_dist_loss, optimizer=opt, metrics=[tf.keras.metrics.MeanSquaredLogarithmicError()])
+    model.compile(loss=custom_dist_loss, optimizer=opt, metrics=[loss_position_metric, loss_vel_loss_metric, loss_ffe_eyevel_metric, loss_pt_is_too_far_from_box_center_metric, loss_slow_down_loss_metric, tf.keras.metrics.MeanSquaredLogarithmicError()])
 
     introspect = LambdaCallback(on_epoch_end=train_save_step) #lambda batch, logs: print(model.layers[3].get_weights())
     
@@ -263,6 +284,7 @@ def train_model(epochs, resume=False):
 
     model._tensorboard_callback = tf.keras.callbacks.TensorBoard(log_dir="./logs/fit/" + model._timestamp_str)
     model._tensorboard_callback.set_model(model)
+    
     
 
     callbacks = []
@@ -292,11 +314,12 @@ def train_model(epochs, resume=False):
 
     try:
         model.reset_states()
-        with model._tensorboard_callback._train_writer.as_default():
-            # validation_data=valgen, validation_batch_size=1, 
-            model.fit(traingen, batch_size=Globals.TRAIN_BATCH_SIZE, initial_epoch=model._epochs_trained, epochs=model._epochs_trained+(epochs_safe - model._epochs_trained % epochs_safe), callbacks=callbacks, shuffle=False) #, callbacks=[model_checkpoint_callback]
+        #with model._tensorboard_callback.writer.as_default():
+        # validation_data=valgen, validation_batch_size=1, 
+        model.fit(traingen, batch_size=Globals.TRAIN_BATCH_SIZE, initial_epoch=model._epochs_trained, epochs=model._epochs_trained+(epochs_safe - model._epochs_trained % epochs_safe), callbacks=callbacks, shuffle=False) #, callbacks=[model_checkpoint_callback]
         
         train_save_step(None, None)
+        model._epochs_trained -= 1
         #print (model._epochs_trained)
         if model._epochs_trained >= epochs:
             model.train_completed = True
@@ -310,6 +333,7 @@ def train_model(epochs, resume=False):
     except Exception as e:
         print("Exception during training, halting")
         print (e)
+        traceback.print_exception(*sys.exc_info())
         sys.exit(69)
         return True, [0,0]
         #sys.exit(-1)
@@ -345,26 +369,36 @@ data_serve_init()
 if sys.argv[1].lower() == "train":
     resume = False
     while True:
-        train_completed, score = train_model(Globals.TRAIN_NUM_EPOCHS, resume)
-        if not train_completed:
-            print("Train aborted? Resuming...")
-            resume = True
-        else:
-            break
+        with tf.device('/CPU:0'):
+            #tf.compat.v1.disable_eager_execution()
+            #with tf.xla.experimental.jit_scope(separate_compiled_gradients=True):
+            train_completed, score = train_model(Globals.TRAIN_NUM_EPOCHS, resume)
+            if not train_completed:
+                print("Train aborted? Resuming...")
+                resume = True
+            else:
+                break
 
     print ("Done!!")
     #run_network()
 elif sys.argv[1].lower() == "resume":
     resume = True
     while True:
-        train_completed, score = train_model(Globals.TRAIN_NUM_EPOCHS, resume)
-        if not train_completed:
-            print("Train aborted? Resuming...")
-            resume = True
-        else:
-            break
+        with tf.device('/CPU:0'):
+
+            train_completed, score = train_model(Globals.TRAIN_NUM_EPOCHS, resume)
+            if not train_completed:
+                print("Train aborted? Resuming...")
+                resume = True
+            else:
+                break
     print ("Done!!")
     #run_network()
 elif sys.argv[1].lower() == "run":
+    old_batch_size = Globals.TRAIN_BATCH_SIZE
+    Globals.TRAIN_BATCH_SIZE = 1
+
     with tf.device('/CPU:0'):
         run_network()
+
+    #Globals.TRAIN_BATCH_SIZE = old_batch_size

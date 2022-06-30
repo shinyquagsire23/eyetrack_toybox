@@ -1,0 +1,15 @@
+*.h5
+*.pkl
+*.pb
+*.json
+junk.py
+unk_bak.py
+test.txt
+test.py
+logs/*
+baseline/*
+hex_baseline/*
+old/*
+eyetrack_net_timestampstr.txt
+eyetrack_net_saved/*
+.DS_Store

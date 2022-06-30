@@ -4,6 +4,7 @@ import random
 import tensorflow as tf
 import numpy as np
 import time
+import sys
 
 import decord as de
 
@@ -301,7 +302,7 @@ class CustomDataGen(tf.keras.utils.Sequence):
         if self.current_frame_y >= self.frame_cnt:
             self.current_frame_y = 0
 
-        if not self.validation and int(time.time() - self.last_data_fetch) > 30:
+        if not self.validation and int(time.time() - self.last_data_fetch) > 180:
             print ("Taking a long time?")
             #raise TakingTooLongException
             sys.exit(69)

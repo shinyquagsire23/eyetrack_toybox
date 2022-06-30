@@ -23,7 +23,7 @@ class Globals():
     TRAIN_INPUT_SHAPE = (TRAIN_BATCH_SIZE, 288,384,1)
     EXPORT_INPUT_SHAPE = (1, 288,384,1)
 
-    TRAIN_NUM_EPOCHS = 1000
+    TRAIN_NUM_EPOCHS = 2000
 
     def idk():
         a='a'
