@@ -85,7 +85,7 @@ class HexPatchLayer(keras.layers.Layer):
         pos = inputs[3]
         hexrot = inputs[4]
 
-        scale = tf.clip_by_value(scale, 0.0, 1.0)
+        scale = tf.clip_by_value(scale, 1.0, 4.0)
         pos = tf.clip_by_value(pos, 0.0, 1.0)
 
         output_shape = (-1, Globals.NETWORK_PATCH_SIZE, Globals.NETWORK_PATCH_SIZE, 3)
@@ -373,7 +373,7 @@ class EyeNet(tf.keras.Model):
         fe_x_xy = last_fe_output[:, RSTATE_IDX_XPOS:RSTATE_IDX_YPOS+1] + fe_x[:, RSTATE_IDX_XVEL:RSTATE_IDX_YVEL+1]
         fe_x_xy = tf.math.floormod(fe_x_xy, 1.0)
         #fe_x_xy = last_fe_output[:, 0:2] + last_fe_output[:, 3:5]
-        fe_x_scale = tf.clip_by_value(last_fe_output[:, RSTATE_IDX_SCALE:RSTATE_IDX_SCALE+1] + fe_x[:, RSTATE_IDX_SCALEVEL:RSTATE_IDX_SCALEVEL+1], 0.5, 1.5)
+        fe_x_scale = tf.clip_by_value(last_fe_output[:, RSTATE_IDX_SCALE:RSTATE_IDX_SCALE+1] + fe_x[:, RSTATE_IDX_SCALEVEL:RSTATE_IDX_SCALEVEL+1], 0.5, 4.0)
 
         fe_x_hexshape = last_fe_output[:, RSTATE_IDX_SHAPE:RSTATE_IDX_SHAPE+1] + fe_x[:, RSTATE_IDX_SHAPEVEL:RSTATE_IDX_SHAPEVEL+1]
         fe_x_hexrot = last_fe_output[:, RSTATE_IDX_ROT:RSTATE_IDX_ROT+1] + fe_x[:, RSTATE_IDX_ROTVEL:RSTATE_IDX_ROTVEL+1]
@@ -388,8 +388,8 @@ class EyeNet(tf.keras.Model):
         #print (fe_x[:, 2:3].shape)
         
 
-        shift_left = tf.math.multiply(shift_left, float(Globals.NETWORK_PATCH_SIZE) * 4.0) #float(self.patch_size)
-        shift_right = tf.math.multiply(shift_right, float(Globals.NETWORK_PATCH_SIZE) * 4.0)
+        shift_left = tf.math.multiply(shift_left, float(Globals.NETWORK_PATCH_SIZE) * 3.5) #float(self.patch_size)
+        shift_right = tf.math.multiply(shift_right, float(Globals.NETWORK_PATCH_SIZE) * 3.5)
         shift_left = tf.math.multiply(shift_left, fe_x_scale)
         shift_right = tf.math.multiply(shift_right, fe_x_scale)
         #shift_left = tf.math.multiply(shift_left, fe_x[:, 2:3])

@@ -78,7 +78,7 @@ def train_model(epochs, resume=False):
 
         model._epochs_trained += 1
         model.save_weights(filepath="eyetrack_net.h5")
-        if model._epochs_trained % 30 == 0:
+        if model._epochs_trained % 100 == 0:
             model.save_weights(filepath="eyetrack_net_" + str(model._epochs_trained) + ".h5")
         #model.save("eyetrack_train.h5")
 
@@ -263,7 +263,7 @@ def train_model(epochs, resume=False):
 
     #plot_stuff(model)
 
-    epochs_safe = 30
+    epochs_safe = 100
     '''
     if model._epochs_trained == 0:
         opt = tf.keras.optimizers.Adam(learning_rate=1e-5)
