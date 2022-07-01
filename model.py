@@ -21,6 +21,12 @@ RSTATE_IDX_SHAPEVEL = 8
 RSTATE_IDX_ROTVEL = 9
 RSTATE_IDX_END = 8
 
+OUT_IDX_X = 0
+OUT_IDX_Y = 1
+OUT_IDX_XVEL = 2
+OUT_IDX_YVEL = 3
+OUT_IDX_END = 4
+
 class EchoRNNCell(keras.layers.Layer):
     '''
     Used to keep a recurrent state for previous values of any Tensor
@@ -32,7 +38,6 @@ class EchoRNNCell(keras.layers.Layer):
         super(EchoRNNCell, self).__init__(**kwargs)
 
     def build(self, input_shape):
-        #self.state_size = input_shape[0]
         self.built = True
 
     def get_initial_state(self, inputs=None, batch_size=None, dtype=None):
@@ -49,32 +54,15 @@ class EchoRNN(keras.layers.RNN):
     def __init__(self, dims=16, **kwargs):
         super(EchoRNN, self).__init__(EchoRNNCell(dims, **kwargs), stateful=True, unroll=True)
 
-class MinMaxConstraint(Constraint):
-    """constrain model weights between [x_min, x_max]."""
-    def __init__(self, x_min=0.0, x_max=1.0):
-        super().__init__()
-        self.x_min = x_min
-        self.x_max = x_max
-        # TODO: add sanity check if x_max == x_min or w_max == w_min
-    
-    def __call__(self, w):
-        w_min = tf.minimum(tf.math.reduce_min(w), self.x_min)
-        w_max = tf.maximum(tf.math.reduce_max(w), self.x_max)
-        scale = (self.x_max - self.x_min) / (w_max - w_min)
-        m = self.x_min - w_min * scale
-        w = w * scale
-        return w + m
-
 class HexPatchLayer(keras.layers.Layer):
     '''
-    Used to keep a recurrent state for previous values of any Tensor
+    Wrapper for the hex resampling
     '''
     def __init__(self, batch_size=Globals.TRAIN_BATCH_SIZE, **kwargs):
         self.batch_size = batch_size
         super(HexPatchLayer, self).__init__(**kwargs)
 
     def build(self, input_shape):
-        #self.state_size = input_shape[0]
         self.built = True
 
     def call(self, inputs, training=False):
@@ -103,6 +91,7 @@ class HexPatchLayer(keras.layers.Layer):
         self._patch_2 = tf.cast(b[0], dtype=tf.float32)
         self._patch_3 = tf.cast(c[0], dtype=tf.float32)
 
+        # Find a nice solution for NaNs
         '''
         if training:
             gamma = tf.random.uniform([], 1.8, 1.9)
@@ -120,10 +109,6 @@ class HexPatchLayer(keras.layers.Layer):
         self._patch_2 = tf.image.per_image_standardization(self._patch_2)
         self._patch_3 = tf.image.per_image_standardization(self._patch_3)
 
-        #tf.print(self._patch_1, self._patch_2, self._patch_3)
-
-        #print (self._grid_x_1.name)
-
         return tf.reshape(tf.stack([self._patch_1,self._patch_2,self._patch_3], axis=3), output_shape)
 
 
@@ -139,9 +124,7 @@ class EyeNet(tf.keras.Model):
         def relu_clipped_1(x):
             return K.relu(x, alpha=0.05, max_value=1.1)
 
-        #self._train_epoch_num_tensor = tf.Variable(0, dtype=tf.int64, trainable=False, name="_train_epoch_num_tensor")
 
-        #self.boxes = None
         self.batch_size = batch_size
         self.box_indices = None
         self.input_layer = layers.Layer(name="input_layer", input_shape=(self.batch_size, input_shape[1], input_shape[2], input_shape[3]))
@@ -170,21 +153,12 @@ class EyeNet(tf.keras.Model):
         self.fe_dense_3 = layers.Dense(Globals.NETWORK_RECURRENT_SIZE, activation='tanh', name="fe_dense_3")
         self.fe_reshape_postdense = layers.Reshape((Globals.NETWORK_RECURRENT_SIZE,))
         
-        #self.fe_rnn_cell_reshape_1 = layers.Reshape((1, 8))
-        #self.fe_rnn_cell_1 = tf.keras.layers.RNN(tf.keras.layers.LSTMCell(units=8, activation = 'tanh'), return_sequences = True)
         self.fe_flatten = layers.Flatten()
         self.fe_dense_4 = layers.Dense(units=2048, activation='tanh', name="fe_dense4")
         self.fe_dense_5 = layers.Dense(units=512, activation="tanh", name="fe_dense5")
         self.fe_dense_6 = layers.Dense(units=128, activation="tanh", name="fe_dense6")
         self.fe_dense_7 = layers.Dense(units=64, activation="tanh", name="fe_dense7")
-        #self.fe_dense_4_2 = layers.Dense(64, activation='tanh')
-        #self.fe_out = layers.Dense(5, activation='linear', kernel_constraint=MinMaxConstraint(0.1, 1.0), bias_constraint=MinMaxConstraint(-1.0, 1.0))
         self.fe_out = layers.Dense(Globals.NETWORK_RECURRENT_SIZE, activation='tanh')
-        #self.fe_out_2 = layers.Dense(Globals.NETWORK_RECURRENT_SIZE, activation='tanh')
-
-        #self.fe_indirect_access = tf.Variable(tf.ones((self.batch_size, Globals.NETWORK_RECURRENT_SIZE)) * 0.5, trainable=False, name="fe_indirect_access")
-        #self.outputs_indirect_access = tf.Variable(tf.ones((self.batch_size, Globals.NETWORK_OUTPUT_SIZE)) * 0.5, trainable=False, name="outputs_indirect_access")
-        #self.box_indirect_access = tf.Variable(tf.ones((self.batch_size, Globals.NETWORK_OUTPUT_SIZE)) * 0.5, trainable=False, name="box_indirect_access")
 
         self.fe_final_concat = layers.Concatenate(axis=1)
         self.fe_x_concat = layers.Concatenate(axis=1)
@@ -215,14 +189,9 @@ class EyeNet(tf.keras.Model):
         self.dense_3 = layers.Dense(units=256, activation="tanh", name="dense3")
         self.reshape_1 = layers.Reshape((Globals.NETWORK_OUTPUT_SIZE, -1))
         self.dense_4 = layers.Dense(units=256, activation="tanh", name="dense4")
-        #self.dense_4_2 = layers.Dense(units=64, activation="tanh", name="dense4_2")
-        #self.ffe_dropout_dense = layers.Dropout(0.5)
-        #self.dense_out = layers.Dense(units=1, activation="linear", name="p_out", kernel_constraint=MinMaxConstraint(-1.0, 1.0), bias_constraint=MinMaxConstraint(-1.0, 1.0))
         self.dense_out = layers.Dense(units=1, name="p_out", activation='tanh')
-        #self.dense_out_2 = layers.Dense(units=1, activation=relu_clipped_1, name="p_out_2")
         self.reshape_2 = layers.Reshape((Globals.NETWORK_OUTPUT_SIZE,))
-        #self.metric_1 = tf.keras.metrics.Mean(name='metric_1')
-
+        
         self.last_output_rnn = EchoRNN(dims=Globals.NETWORK_OUTPUT_SIZE, batch_size=self.batch_size, name="last_output_rnn")
         self.last_output_raw_rnn = EchoRNN(dims=Globals.NETWORK_OUTPUT_SIZE, batch_size=self.batch_size, name="last_output_raw_rnn")
         self.last_fe_output_rnn = EchoRNN(dims=Globals.NETWORK_RECURRENT_SIZE, batch_size=self.batch_size, name="last_fe_output_rnn")
@@ -372,7 +341,6 @@ class EyeNet(tf.keras.Model):
 
         fe_x_xy = last_fe_output[:, RSTATE_IDX_XPOS:RSTATE_IDX_YPOS+1] + fe_x[:, RSTATE_IDX_XVEL:RSTATE_IDX_YVEL+1]
         fe_x_xy = tf.math.floormod(fe_x_xy, 1.0)
-        #fe_x_xy = last_fe_output[:, 0:2] + last_fe_output[:, 3:5]
         fe_x_scale = tf.clip_by_value(last_fe_output[:, RSTATE_IDX_SCALE:RSTATE_IDX_SCALE+1] + fe_x[:, RSTATE_IDX_SCALEVEL:RSTATE_IDX_SCALEVEL+1], 0.5, 4.0)
 
         fe_x_hexshape = last_fe_output[:, RSTATE_IDX_SHAPE:RSTATE_IDX_SHAPE+1] + fe_x[:, RSTATE_IDX_SHAPEVEL:RSTATE_IDX_SHAPEVEL+1]
@@ -387,94 +355,47 @@ class EyeNet(tf.keras.Model):
         #print (fe_x.shape)
         #print (fe_x[:, 2:3].shape)
         
-
+        # Scale the bounding box corner shifts
         shift_left = tf.math.multiply(shift_left, float(Globals.NETWORK_PATCH_SIZE) * 3.5) #float(self.patch_size)
         shift_right = tf.math.multiply(shift_right, float(Globals.NETWORK_PATCH_SIZE) * 3.5)
         shift_left = tf.math.multiply(shift_left, fe_x_scale)
         shift_right = tf.math.multiply(shift_right, fe_x_scale)
-        #shift_left = tf.math.multiply(shift_left, fe_x[:, 2:3])
-        #shift_right = tf.math.multiply(shift_right, fe_x[:, 2:3])
-
-
-        #shift_left = [1,2]
-        #shift_right = [1,2]
-
         
-
-        #fe_x1y1 = tfp.math.clip_by_value_preserve_gradient(fe_x[:, 0:2], 0.0, 1.0) + shift_left #+ fe_x[:, 3:5]
-        #fe_x2y2 = tfp.math.clip_by_value_preserve_gradient(fe_x[:, 0:2], 0.0, 1.0) + shift_right #+ fe_x[:, 3:5]
+        # Apply bounding box corners
         fe_x1y1 = fe_x_xy[:, 0:2] + shift_left #+ fe_x[:, 3:5]
         fe_x2y2 = fe_x_xy[:, 0:2] + shift_right #+ fe_x[:, 3:5]
-
-        # Prevent the box from running off the sides of the image
-        
-        '''
-        fe_x2y2 -= tf.minimum(fe_x1y1, 0.0)
-        fe_x1y1 -= tf.minimum(fe_x1y1, 0.0)
-        
-        fe_x1y1 -= (tf.maximum(fe_x2y2, 1.0) - 1.0)
-        fe_x2y2 -= (tf.maximum(fe_x2y2, 1.0) - 1.0)
-        '''
         
         fe_x_final = self.fe_final_concat([fe_x1y1, fe_x2y2])
 
-        #fe_x_xy = (fe_x2y2 + fe_x1y1) * 0.5
-        fe_x = self.fe_x_concat([tf.clip_by_value(fe_x_xy, 0.0, 1.0), fe_x_scale, fe_x[:, RSTATE_IDX_XVEL:RSTATE_IDX_XVEL+1], fe_x[:, RSTATE_IDX_YVEL:RSTATE_IDX_YVEL+1], fe_x[:, RSTATE_IDX_SCALEVEL:RSTATE_IDX_SCALEVEL+1], fe_x_hexshape, fe_x_hexrot, fe_x[:, RSTATE_IDX_END:Globals.NETWORK_RECURRENT_SIZE]])
+        # Store the next recurrent state
+        fe_x = self.fe_x_concat([fe_x_xy, fe_x_scale, fe_x[:, RSTATE_IDX_XVEL:RSTATE_IDX_XVEL+1], fe_x[:, RSTATE_IDX_YVEL:RSTATE_IDX_YVEL+1], fe_x[:, RSTATE_IDX_SCALEVEL:RSTATE_IDX_SCALEVEL+1], fe_x_hexshape, fe_x_hexrot, fe_x[:, RSTATE_IDX_END:Globals.NETWORK_RECURRENT_SIZE]])
         fe_x_rnnin = tf.reshape(fe_x, (inputs_shape[0], 1, Globals.NETWORK_RECURRENT_SIZE))
         fe_x_ = self.last_fe_output_rnn(fe_x_rnnin)
-        #print (self.boxes.shape)
 
         crop_size = (self.patch_size, self.patch_size)
 
-        #self.add_metric(x, name='crop')
-
-        #boxes =
 
         fe_x_final_rnnin = tf.reshape(fe_x_final, (inputs_shape[0], 1, 4))
         fe_x_final_ = self.last_rect_output_rnn(fe_x_final_rnnin)
 
-        '''
-        x = tf.image.crop_and_resize(
-            image_input,
-            fe_x_final,
-            self.box_indices,
-            crop_size,
-            method='bilinear',
-            name="image_crop_tfop"
-        )
-        '''
 
         self._fe_x_final = fe_x_final
-
-        #a,b,c = tf.keras.layers.Lambda(lambda image_input: hexagonal_patches_simple_tf(image_input, fe_x_scale, [0.0]*self.batch_size, fe_x_xy, [0.0]*self.batch_size))(image_input)
         x = self.hex_crop([image_input, fe_x_scale, fe_x_hexshape, fe_x_xy, fe_x_hexrot])
         
-        #self.metric_1(x)
-        #tf.print(inputs)
-        #tf.print(x)
-
-        #self.add_metric(tf.reduce_sum(x), name='metric_2')
-        #self.add_metric(self.metric_1(x))
 
         x = self.ffe_conv_1(x)
         x = self.ffe_conv_1_batchnorm(x)
-        #x = self.ffe_conv_1_relu(x)
         x = self.ffe_pool_1(x)
         
         x = self.ffe_conv_2(x)
         x = self.ffe_conv_2_batchnorm(x)
-        #x = self.ffe_conv_2_relu(x)
         x = self.ffe_pool_2(x)
 
         x = self.ffe_conv_3(x)
         x = self.ffe_conv_3_batchnorm(x)
-        #x = self.ffe_conv_3_relu(x)
-        #x = self.ffe_pool_3(x)
 
         x = self.ffe_conv_4(x)
         x = self.ffe_conv_4_batchnorm(x)
-        #x = self.ffe_conv_4_relu(x)
-        #x = self.ffe_pool_4(x)
 
         x = self.ffe_flatten(x)
         x = self.dense_1(x)
@@ -488,18 +409,13 @@ class EyeNet(tf.keras.Model):
 
         box_center = ((fe_x2y2 + fe_x1y1) * 0.5)
 
-        outputs = outputs * 0.5#(1.1 * outputs) - (1.1 * 0.5)
+        outputs = outputs * 0.5 # -0.5 to 0.5, with 0,0 in the box center
 
         outputs_raw_rnnin = tf.reshape(outputs, (inputs_shape[0], 1, Globals.NETWORK_OUTPUT_SIZE))
         outputs_raw_ = self.last_output_raw_rnn(outputs_raw_rnnin)
-        #tf.print(outputs)
-        
-        #outputs = tf.reshape(outputs, (-1, Globals.NETWORK_OUTPUT_SIZE))
-        #tf.print(outputs)
-        #tf.print(state)
 
-        outputs_x = outputs[:, 0:1]
-        outputs_y = outputs[:, 1:2]
+        outputs_x = outputs[:, OUT_IDX_X:OUT_IDX_X+1]
+        outputs_y = outputs[:, OUT_IDX_Y:OUT_IDX_Y+1]
 
         outputs_x *= (fe_x2y2[:, 0:1] - fe_x1y1[:, 0:1])
         outputs_y *= (fe_x2y2[:, 1:2] - fe_x1y1[:, 1:2])
@@ -507,47 +423,19 @@ class EyeNet(tf.keras.Model):
         outputs_x += box_center[:, 0:1]#fe_x1y1[:, 1:2]
         outputs_y += box_center[:, 1:2]#fe_x1y1[:, 0:1]
 
-        last_outputs_x = last_output[:, 0:1]
-        last_outputs_y = last_output[:, 1:2]
+        last_outputs_x = last_output[:, OUT_IDX_X:OUT_IDX_X+1]
+        last_outputs_y = last_output[:, OUT_IDX_Y:OUT_IDX_Y+1]
         
         # keep points within box
         #outputs_x = tf.clip_by_value(outputs_x, fe_x1y1[:, 1:2], fe_x2y2[:, 1:2])
         #outputs_y = tf.clip_by_value(outputs_y, fe_x1y1[:, 0:1], fe_x2y2[:, 0:1])
-        
 
-        #outputs_x += fe_x[:, 3:4]
-        #outputs_y += fe_x[:, 4:5]
-
-        last_outputs_x_vel = last_output[:, 2:3] # last x vel
-        last_outputs_y_vel = last_output[:, 3:4] # last y vel
+        last_outputs_x_vel = last_output[:, OUT_IDX_XVEL:OUT_IDX_XVEL+1] # last x vel
+        last_outputs_y_vel = last_output[:, OUT_IDX_YVEL:OUT_IDX_YVEL+1] # last y vel
         outputs_x_vel = (outputs_x - fe_x1y1[:, 0:1]) - (last_outputs_x - last_rect[:, 0:1]) + fe_x[:, RSTATE_IDX_XVEL:RSTATE_IDX_XVEL+1]
         outputs_y_vel = (outputs_y - fe_x1y1[:, 1:2]) - (last_outputs_y - last_rect[:, 1:2]) + fe_x[:, RSTATE_IDX_YVEL:RSTATE_IDX_YVEL+1]
 
-        '''
-        outputs_x_vel_fixed = tf.where(tf.greater(last_outputs_x_vel, 0.0), 
-                                 tf.where(tf.less(outputs_x_vel, 0.0), tf.math.floormod(outputs_x_vel, 1.0), outputs_x_vel),
-                                 tf.where(tf.greater(outputs_x_vel, 0.0), tf.math.floormod(outputs_x_vel, -1.0), outputs_x_vel))
-        outputs_y_vel_fixed = tf.where(tf.greater(last_outputs_y_vel, 0.0), 
-                                 tf.where(tf.less(outputs_y_vel, 0.0), tf.math.floormod(outputs_y_vel, 1.0), outputs_y_vel),
-                                 tf.where(tf.greater(outputs_y_vel, 0.0), tf.math.floormod(outputs_y_vel, -1.0), outputs_y_vel))
-
-        outputs_x_vel = tf.where(tf.greater(outputs_x_vel, 0.9 - last_outputs_x_vel),
-                                 outputs_x_vel_fixed,
-                                 tf.where(tf.less(outputs_x_vel, -0.9 + last_outputs_x_vel),
-                                          outputs_x_vel_fixed,
-                                          outputs_x_vel)
-                                 )
-        outputs_y_vel = tf.where(tf.greater(outputs_y_vel, 0.9 - last_outputs_y_vel),
-                                 outputs_y_vel_fixed,
-                                 tf.where(tf.less(outputs_y_vel, -0.9 + last_outputs_y_vel),
-                                          outputs_y_vel_fixed,
-                                          outputs_y_vel)
-                                 )
-        '''
-
         outputs = tf.concat([outputs_x, outputs_y, outputs_x_vel, outputs_y_vel], -1)
-        #print ("asdf", outputs_x, outputs_y, outputs_x_vel, outputs_y_vel)
-        #outputs_flipped = tf.concat([outputs_y, outputs_x], -1)
         outputs_rnnin = tf.reshape(outputs, (inputs_shape[0], 1, Globals.NETWORK_OUTPUT_SIZE))
         outputs_ = self.last_output_rnn(outputs_rnnin)
        
@@ -558,11 +446,7 @@ class EyeNet(tf.keras.Model):
             self.outputs_tensor = outputs
             self.scale_tensor = fe_x_scale
 
-            #self.outputs_indirect_access.assign(tf.reshape(outputs_flipped, (self.batch_size, Globals.NETWORK_OUTPUT_SIZE)))
-            #self.box_indirect_access.assign(tf.reshape(box_center, (self.batch_size, 2)))
-            
-        #return (outputs + ((fe_x1y1 + fe_x2y2) * 0.5)) * 0.5
-        #return ((fe_x2y2 + fe_x1y1) * 0.5) + (outputs * 0.0)
+
         return outputs
 
 
@@ -572,13 +456,8 @@ def build_model(batch_size):
     input_shape = (batch_size, Globals.TRAIN_INPUT_SHAPE[1], Globals.TRAIN_INPUT_SHAPE[2], Globals.TRAIN_INPUT_SHAPE[3])
     Globals.TRAIN_INPUT_SHAPE = input_shape
 
-    #input_shape = (batch_size, 256,256,1)
     output_shape = (Globals.NETWORK_OUTPUT_SIZE,)
 
-    #print ("Input shape:", input_shape)
-    #print ("Output shape:", output_shape)
-
-    metric_tensors = []
     inputs = keras.Input(shape=input_shape)
 
     model_out = EyeNet(input_shape=input_shape, batch_size=batch_size)

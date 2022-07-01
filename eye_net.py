@@ -34,9 +34,6 @@ import datetime
 physical_devices = tf.config.list_physical_devices('GPU')
 tf.config.experimental.set_memory_growth(physical_devices[0],True)
 
-#from hanging_threads import start_monitoring
-#start_monitoring(seconds_frozen=10, test_interval=1000)
-
 class TakingTooLongException(Exception):
 
     def __init__(self):
@@ -109,58 +106,11 @@ def train_model(epochs, resume=False):
         y_pred_vel = y_pred[:, 2:4]
 
         def velocity_loss(box_pos, pos, vel):
-            
-            '''
-            direction = tf.multiply(vel, pos-box_pos )
-            direction_bad = tf.minimum(direction, 0.0)
-            direction_bad_mag = tf.math.square(tf.norm(direction_bad, axis=1) * 10.0)
-            
-            loss = tf.reduce_mean(direction_bad_mag) * 1000.0  # (batch_size, 2)
-
-            #dont_stand_still = tf.math.reduce_mean(tf.where(tf.less(tf.abs(vel), 0.00001), [0.0], [1.0])) * 10000.0
-
-            dont_stand_still = tf.math.reduce_mean(vel + tf.where(tf.equal(vel, 0.0), [1000.0], [0.0]))#tf.math.reduce_mean(tf.where(tf.less(vel*vel, 0.001), [1.0], [0.0])) * 1000.0
-
-            
-            #print (loss)
-
-            tf.print("asf", loss, dont_stand_still, vel, pos, box_pos)
-            tf.print(model.last_output_rnn.states[0])
-            tf.print(model.last_fe_output_rnn.states[0][:, 3:5])
-
-            loss += dont_stand_still
-            
-            loss = loss / 2000.0
-            '''
-
-            
-            #loss = tf.math.reduce_sum(tf.math.reduce_euclidean_norm([(vel*10.0), (pos*10.0)-(box_pos*10.0)], [1, 2]))
-            #loss = loss*loss
-
-            '''
-            # slightly counter-intuitive:
-            # with (box_pos*10.0)+(vel*10.0)-(pos*10.0),
-            # if the box gets locked in a corner, it sets vel to the box pos
-            difference = (box_pos*10.0)+(vel*10.0)-(pos*10.0)
-            loss = tf.math.reduce_sum(difference*difference)
-            loss = loss*loss
-            '''
-
             direction = tf.multiply(vel, pos-box_pos )
             direction_bad = tf.minimum(direction, 0.0)
             direction_bad_mag = tf.math.square(tf.norm(direction_bad, axis=1) * 10.0)
             
             loss = tf.reduce_sum(direction_bad_mag) * 100.0
-
-            #loss = loss / 2000.0
-            
-
-            #tf.print(" vel_loss", loss)
-            #tf.print(vel, pos, box_pos)
-            #tf.print(model.last_output_rnn.states[0])
-            #tf.print(model.last_fe_output_rnn.states[0][:, 3:5])
-            #tf.print(model.last_fe_output_rnn.states[0][0, 0:2], model.last_fe_output_rnn.states[0][0, 3:5])
-
 
             return loss
 
@@ -189,19 +139,12 @@ def train_model(epochs, resume=False):
         y_dist = tf.expand_dims(tf.norm(y_true_pos - y_pred_pos, axis=1), axis=1) * 100.0
 
         # calculating squared difference between target and predicted values 
-        loss = y_dist#*y_dist  # (batch_size, 2)
-        #print (y_dist, loss)
-
-        #loss += is_far_away
+        loss = y_dist#*y_dist
+ 
           
         # summing both loss values along batch dimension 
-        loss = tf.math.reduce_sum(loss*loss)        # (batch_size,)
+        loss = tf.math.reduce_sum(loss*loss)
 
-        #tf.print(loss)
-
-        #print (loss)
-
-        #tf.print("idk",loss, vel_loss, vel_loss_2)
 
         model.loss_loss = loss
         model.loss_vel_loss = vel_loss
@@ -228,11 +171,6 @@ def train_model(epochs, resume=False):
         tf.print(model.last_fe_output_rnn.states[0][0, 0:2], model.last_fe_output_rnn.states[0][0, 3:5])
         '''
 
-        # epoch 60:
-        # loss 4817.5752 
-        # vel_loss 7499.12256
-        # pt_is_too_far_from_box_center 138.283066 
-        # 694.791138
         out = (loss * 0.5) + vel_loss_4
 
         # once the model chills out a bit, we can remove the velocity dampening and let it go nuts
@@ -264,12 +202,6 @@ def train_model(epochs, resume=False):
     #plot_stuff(model)
 
     epochs_safe = 100
-    '''
-    if model._epochs_trained == 0:
-        opt = tf.keras.optimizers.Adam(learning_rate=1e-5)
-        epochs_safe = 3
-    else:
-    '''
 
     #opt = tf.keras.optimizers.Adam(learning_rate=1e-5)
     opt = tf.keras.optimizers.Adagrad(learning_rate=0.00001, initial_accumulator_value=0.01, epsilon=1e-07)
@@ -280,17 +212,12 @@ def train_model(epochs, resume=False):
 
     introspect = LambdaCallback(on_epoch_end=train_save_step) #lambda batch, logs: print(model.layers[3].get_weights())
     
-    #plotter = LambdaCallback(on_epoch_end=lambda batch, logs: plot_stuff(model))
-
     model._tensorboard_callback = tf.keras.callbacks.TensorBoard(log_dir="./logs/fit/" + model._timestamp_str)
     model._tensorboard_callback.set_model(model)
-    
-    
 
     callbacks = []
     callbacks += [introspect]
     callbacks += [model._tensorboard_callback] #histogram_freq=1
-    #callbacks += [plotter]
 
     traingen = CustomDataGen(batch_size=Globals.TRAIN_BATCH_SIZE)
     #valgen = CustomDataGen(batch_size=1, validation=True) #sel_idx_shift=1, 
@@ -341,7 +268,7 @@ def train_model(epochs, resume=False):
         print ("Cancelled early")
         exit(-1)
 
-    print ("Done training 1")
+    print ("Done training")
 
     valgen = CustomDataGen(batch_size=Globals.TRAIN_BATCH_SIZE, validation=True)
 

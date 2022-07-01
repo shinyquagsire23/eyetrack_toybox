@@ -255,24 +255,13 @@ def hexagonal_patches_tf(buf, hex_scale, hex_shape, hex_pos, hex_rot):
     one_px_x = (1.0/img_width)
     one_px_y = (1.0/img_height)
 
-    #print (mouseX, mouseY)
-
     all_shift_x = hex_pos[:, 0:1]# * one_px_x
     all_shift_y = hex_pos[:, 1:2]# * one_px_y
 
     rot_coef = tf.reshape(tf.stack([tf.experimental.numpy.cos(hex_rot), tf.experimental.numpy.sin(hex_rot), -tf.experimental.numpy.sin(hex_rot), tf.experimental.numpy.cos(hex_rot)]), (-1, 2, 2))
 
-    #rot_coef = tf.convert_to_tensor([[tf.experimental.numpy.cos(hex_rot), tf.experimental.numpy.sin(hex_rot)], 
-    #                                 [-tf.experimental.numpy.sin(hex_rot), tf.experimental.numpy.cos(hex_rot)]])
-    
-
     hex_radius = float(Globals.NETWORK_PATCH_SIZE)
     hex_h = tf.sqrt(hex_radius**2-(hex_radius/2)**2)
-
-    # biblically accurate
-    #hex_vector_1_s = 1.0 + 0.2*np.sin(hex_rot)#1.0
-    #hex_vector_2_s = 1.0 + 0.2*np.sin(hex_rot + 2*np.pi/3)#1.0
-    #hex_vector_3_s = 1.0 + 0.2*np.sin(hex_rot + 4*np.pi/3)#1.0
 
     hex_vector_1_s = tf.ones((batch_size, 1))
     hex_vector_2_s = tf.ones((batch_size, 1))
@@ -286,7 +275,6 @@ def hexagonal_patches_tf(buf, hex_scale, hex_shape, hex_pos, hex_rot):
     hex_vector_2 = tf.convert_to_tensor([[hex_radius*0.5, hex_h]]) * hex_vector_2_s
     hex_vector_3 = tf.convert_to_tensor([[-hex_radius, 0.0]]) * hex_vector_3_s
 
-    print (hex_vector_1, rot_coef)
     hex_vector_1 = tf.keras.backend.batch_dot(hex_vector_1, rot_coef)
     hex_vector_2 = tf.keras.backend.batch_dot(hex_vector_2, rot_coef)
     hex_vector_3 = tf.keras.backend.batch_dot(hex_vector_3, rot_coef)
@@ -294,11 +282,6 @@ def hexagonal_patches_tf(buf, hex_scale, hex_shape, hex_pos, hex_rot):
     hex_vector_1 = tf.reshape(hex_vector_1, (-1, 2))
     hex_vector_2 = tf.reshape(hex_vector_2, (-1, 2,))
     hex_vector_3 = tf.reshape(hex_vector_3, (-1, 2,))
-
-    #hex_vector_1 = [(mouseX-(all_shift_x/one_px_x)), (mouseY-(all_shift_y/one_px_y))]
-    #hex_vector_2 = [(mouseX-100.0), (mouseY-100.0)]
-    #hex_vector_3 = [(mouseX-100.0), (mouseY-100.0)]
-    #print (hex_vector_3)
 
     all_shift_x += hex_vector_3[:, 0:1] * one_px_x
     all_shift_y += hex_vector_1[:, 1:2]* one_px_y
@@ -376,11 +359,6 @@ def hexagonal_patches_tf(buf, hex_scale, hex_shape, hex_pos, hex_rot):
     grid_x_2, grid_y_2 = tf.map_fn(gridify, [points_x_2, points_y_2])
     grid_x_3, grid_y_3 = tf.map_fn(gridify, [points_x_3, points_y_3])
 
-
-    #grid_x_1, grid_y_1 = tf.stack([tf.meshgrid(x,y) for x,y in a])
-    #grid_x_2, grid_y_2 = tf.stack([tf.meshgrid(x,y) for x,y in zip(tf.unstack(points_x_2), tf.unstack(points_y_2))])
-    #grid_x_3, grid_y_3 = tf.stack([tf.meshgrid(x,y) for x,y in zip(tf.unstack(points_x_3), tf.unstack(points_y_3))])
-
     grid_x_1 = tf.reshape(grid_x_1, (-1, Globals.NETWORK_PATCH_SIZE, Globals.NETWORK_PATCH_SIZE))
     grid_y_1 = tf.reshape(grid_y_1, (-1, Globals.NETWORK_PATCH_SIZE, Globals.NETWORK_PATCH_SIZE))
     grid_x_2 = tf.reshape(grid_x_2, (-1, Globals.NETWORK_PATCH_SIZE, Globals.NETWORK_PATCH_SIZE))
@@ -455,19 +433,10 @@ def hexagonal_patches_tf(buf, hex_scale, hex_shape, hex_pos, hex_rot):
     grid_y_3 += tf.map_fn(batch_mul, [curve_grid_j_i * (one_px_y), funky_coef_3, tf.experimental.numpy.cos(hex_rot)])[0]
     grid_y_3 -= tf.map_fn(batch_mul, [curve_grid_i_invj * (one_px_y), funky_coef_3, tf.experimental.numpy.sin(hex_rot)])[0]
     
-    #tf.print(grid_x_1)
-
     # Finally, do the sampling
-    
-    #cropped_frame = grid_sample_2d(buf, np.expand_dims(grid, axis=0)).numpy()[0,:,:,:]
     cropped_frame_1 = bilinear_sampler(buf, grid_x_1, grid_y_1)
     cropped_frame_2 = bilinear_sampler(buf, grid_x_2, grid_y_2)
     cropped_frame_3 = bilinear_sampler(buf, grid_x_3, grid_y_3)
-    #print (cropped_frame_1.shape)
-    #tf.print(grid_x_1)
-    #tf.print(hex_pos)
-
-    #draw_patches(buf, grid_x_1, grid_y_1, grid_x_2, grid_y_2, grid_x_3, grid_y_3)
 
     return [cropped_frame_1, grid_x_1, grid_y_1], [cropped_frame_2, grid_x_2, grid_y_2], [cropped_frame_3, grid_x_3, grid_y_3]
 
