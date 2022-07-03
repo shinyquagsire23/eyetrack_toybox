@@ -75,12 +75,17 @@ def train_model(epochs, resume=False):
 
         model._epochs_trained += 1
         model.save_weights(filepath="eyetrack_net.h5")
-        if model._epochs_trained % 100 == 0:
-            model.save_weights(filepath="eyetrack_net_" + str(model._epochs_trained) + ".h5")
-        #model.save("eyetrack_train.h5")
 
         symbolic_weights = getattr(model.optimizer, 'weights')
         weight_values = K.batch_get_value(symbolic_weights)
+        
+        if model._epochs_trained % 100 == 0:
+            model.save_weights(filepath="eyetrack_net_" + str(model._epochs_trained) + ".h5")
+            with open('eyetrack_net_optimizer' + str(model._epochs_trained) + '.pkl', 'wb') as f:
+                pickle.dump(weight_values, f)
+        #model.save("eyetrack_train.h5")
+
+        
         with open('eyetrack_net_optimizer.pkl', 'wb') as f:
             pickle.dump(weight_values, f)
         with open('eyetrack_net_epochs.pkl', 'wb') as f:
@@ -292,6 +297,7 @@ def train_model(epochs, resume=False):
 #
 
 data_serve_init()
+#tf.config.optimizer.set_jit(True)
 
 if sys.argv[1].lower() == "train":
     resume = False

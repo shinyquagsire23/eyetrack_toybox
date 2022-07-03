@@ -356,8 +356,8 @@ class EyeNet(tf.keras.Model):
         #print (fe_x[:, 2:3].shape)
         
         # Scale the bounding box corner shifts
-        shift_left = tf.math.multiply(shift_left, float(Globals.NETWORK_PATCH_SIZE) * 3.5) #float(self.patch_size)
-        shift_right = tf.math.multiply(shift_right, float(Globals.NETWORK_PATCH_SIZE) * 3.5)
+        shift_left = tf.math.multiply(shift_left, float(Globals.NETWORK_PATCH_SIZE) * 4.0) #float(self.patch_size)
+        shift_right = tf.math.multiply(shift_right, float(Globals.NETWORK_PATCH_SIZE) * 4.0)
         shift_left = tf.math.multiply(shift_left, fe_x_scale)
         shift_right = tf.math.multiply(shift_right, fe_x_scale)
         
